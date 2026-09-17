@@ -38,3 +38,4 @@ build/
 docker-compose.override.yml
 .venv-linux/
 .python-version
+docker/wazuh/wazuh-docker/
