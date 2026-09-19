@@ -1,5 +1,21 @@
 services:
 
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: socagent-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://socagent:socagent@postgres:5432/socagent
+    depends_on:
+      - postgres
+    networks:
+      - project_default
+      - wazuh_network
+
   postgres:
     image: postgres:16
     container_name: socagent-postgres
@@ -12,6 +28,28 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - project_default
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: socagent-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - project_default
 
 volumes:
   postgres_data:
+
+networks:
+  project_default:
+    driver: bridge
+
+  wazuh_network:
+    external: true
+    name: single-node_default
