@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+from .embeddings import TokenPositionalEmbedding
 from .transformer_block import TransformerBlock
 
 
@@ -17,17 +18,12 @@ class TinyLLM(nn.Module):
     ):
         super().__init__()
 
-        self.vocab_size = vocab_size
         self.max_seq_len = max_seq_len
 
-        self.token_embedding = nn.Embedding(
-            vocab_size,
-            embed_dim,
-        )
-
-        self.position_embedding = nn.Embedding(
-            max_seq_len,
-            embed_dim,
+        self.embedding = TokenPositionalEmbedding(
+            vocab_size=vocab_size,
+            embed_dim=embed_dim,
+            max_seq_len=max_seq_len,
         )
 
         self.transformer_blocks = nn.ModuleList(
@@ -50,7 +46,7 @@ class TinyLLM(nn.Module):
         )
 
     def forward(self, input_ids):
-        batch_size, seq_len = input_ids.shape
+        _, seq_len = input_ids.shape
 
         if seq_len > self.max_seq_len:
             raise ValueError(
@@ -58,29 +54,10 @@ class TinyLLM(nn.Module):
                 f"maximum length {self.max_seq_len}"
             )
 
-        positions = torch.arange(
-            seq_len,
-            device=input_ids.device,
-        ).unsqueeze(0)
-
-        x = (
-            self.token_embedding(input_ids)
-            + self.position_embedding(positions)
-        )
-
-        # Causal mask prevents the model from seeing future tokens.
-        causal_mask = torch.triu(
-            torch.ones(
-                seq_len,
-                seq_len,
-                device=input_ids.device,
-                dtype=torch.bool,
-            ),
-            diagonal=1,
-        )
+        x = self.embedding(input_ids)
 
         for block in self.transformer_blocks:
-            x = block(x, causal_mask)
+            x = block(x)
 
         x = self.norm(x)
 
