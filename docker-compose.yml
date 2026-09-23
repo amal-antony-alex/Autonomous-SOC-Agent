@@ -10,6 +10,9 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://socagent:socagent@postgres:5432/socagent
+      WAZUH_API_URL: ${WAZUH_API_URL}
+      WAZUH_API_USERNAME: ${WAZUH_API_USERNAME}
+      WAZUH_API_PASSWORD: ${WAZUH_API_PASSWORD}
     depends_on:
       - postgres
     networks:
