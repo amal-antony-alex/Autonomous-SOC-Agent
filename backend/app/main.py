@@ -5,6 +5,7 @@ from app.db import get_db
 from app.models.alert import Alert
 from app.services.alert_normalizer import alert_normalizer
 from app.services.alert_deduplicator import alert_deduplicator
+from app.services.rulebook_engine import rulebook_engine
 
 
 app = FastAPI(
@@ -39,7 +40,6 @@ def receive_wazuh_alert(
     alert: dict,
     db: Session = Depends(get_db)
 ):
-
     # Step 1: Normalize raw Wazuh alert
     normalized_alert = alert_normalizer.normalize(alert)
 
@@ -55,7 +55,10 @@ def receive_wazuh_alert(
             "source": "wazuh"
         }
 
-    # Step 3: Create database alert record
+    # Step 3: Evaluate alert against SOC rulebook
+    rulebook_matches = rulebook_engine.evaluate(alert)
+
+    # Step 4: Create database alert record
     db_alert = Alert(
         wazuh_alert_id=normalized_alert.get("alert_id"),
         timestamp=normalized_alert.get("timestamp"),
@@ -72,7 +75,7 @@ def receive_wazuh_alert(
         raw_json=normalized_alert.get("raw_alert")
     )
 
-    # Step 4: Save to PostgreSQL
+    # Step 5: Save alert to PostgreSQL
     db.add(db_alert)
     db.commit()
     db.refresh(db_alert)
@@ -80,10 +83,14 @@ def receive_wazuh_alert(
     print("New Wazuh alert stored in PostgreSQL:")
     print(normalized_alert)
 
+    print("Rulebook matches:")
+    print(rulebook_matches)
+
     return {
         "status": "accepted",
         "source": "wazuh",
         "duplicate": False,
         "database_id": db_alert.id,
+        "rulebook_matches": rulebook_matches,
         "alert": normalized_alert
     }

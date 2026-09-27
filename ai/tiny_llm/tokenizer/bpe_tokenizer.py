@@ -15,6 +15,7 @@ class BPETokenizer:
         self.vocab_size = vocab_size
 
         self.token_to_id = dict(self.SPECIAL_TOKENS)
+
         self.id_to_token = {
             idx: token
             for token, idx in self.token_to_id.items()
@@ -26,10 +27,6 @@ class BPETokenizer:
         return re.findall(r"\w+|[^\w\s]", text.lower())
 
     def build_vocabulary(self, texts):
-        """
-        Build a basic BPE vocabulary from training text.
-        """
-
         word_counter = Counter()
 
         for text in texts:
@@ -38,109 +35,73 @@ class BPETokenizer:
             for word in words:
                 word_counter[word] += 1
 
-        # Start with characters.
-        vocabulary = set()
-
+        # Add complete words first.
         for word in word_counter:
-            vocabulary.update(word)
+            if word not in self.token_to_id:
+                token_id = len(self.token_to_id)
 
-        next_id = len(self.token_to_id)
+                if token_id >= self.vocab_size:
+                    break
 
-        for token in sorted(vocabulary):
-            if token not in self.token_to_id:
-                self.token_to_id[token] = next_id
-                self.id_to_token[next_id] = token
-                next_id += 1
+                self.token_to_id[word] = token_id
+                self.id_to_token[token_id] = word
 
-        # Perform simple BPE merges.
-        while len(self.token_to_id) < self.vocab_size:
-            pair_counts = Counter()
+        # Add individual characters for unknown words.
+        for word in word_counter:
+            for character in word:
+                if character not in self.token_to_id:
+                    token_id = len(self.token_to_id)
 
-            for word, frequency in word_counter.items():
-                symbols = list(word)
+                    if token_id >= self.vocab_size:
+                        break
 
-                for i in range(len(symbols) - 1):
-                    pair = (symbols[i], symbols[i + 1])
-                    pair_counts[pair] += frequency
-
-            if not pair_counts:
-                break
-
-            best_pair, best_count = pair_counts.most_common(1)[0]
-
-            if best_count < 2:
-                break
-
-            merged_token = "".join(best_pair)
-
-            if merged_token in self.token_to_id:
-                break
-
-            self.merges.append(best_pair)
-
-            self.token_to_id[merged_token] = next_id
-            self.id_to_token[next_id] = merged_token
-            next_id += 1
-
-            if next_id >= self.vocab_size:
-                break
-
-            # Update words using the new merge.
-            updated_counter = Counter()
-
-            for word, frequency in word_counter.items():
-                symbols = list(word)
-                merged_symbols = []
-
-                i = 0
-
-                while i < len(symbols):
-                    if (
-                        i < len(symbols) - 1
-                        and symbols[i] == best_pair[0]
-                        and symbols[i + 1] == best_pair[1]
-                    ):
-                        merged_symbols.append(merged_token)
-                        i += 2
-                    else:
-                        merged_symbols.append(symbols[i])
-                        i += 1
-
-                updated_counter[" ".join(merged_symbols)] += frequency
-
-            word_counter = updated_counter
+                    self.token_to_id[character] = token_id
+                    self.id_to_token[token_id] = character
 
         return self
+
+    def _encode_word(self, word):
+        # Exact word match.
+        if word in self.token_to_id:
+            return [self.token_to_id[word]]
+
+        # Character fallback.
+        token_ids = []
+
+        for character in word:
+            token_ids.append(
+                self.token_to_id.get(
+                    character,
+                    self.token_to_id["<UNK>"]
+                )
+            )
+
+        return token_ids
 
     def encode(
         self,
         text,
         add_bos=True,
-        add_eos=True,
+        add_eos=True
     ):
         tokens = []
 
         if add_bos:
-            tokens.append(self.token_to_id["<BOS>"])
+            tokens.append(
+                self.token_to_id["<BOS>"]
+            )
 
         words = self._pre_tokenize(text)
 
         for word in words:
-            if word in self.token_to_id:
-                tokens.append(self.token_to_id[word])
-                continue
-
-            # Character-level fallback.
-            for character in word:
-                tokens.append(
-                    self.token_to_id.get(
-                        character,
-                        self.token_to_id["<UNK>"],
-                    )
-                )
+            tokens.extend(
+                self._encode_word(word)
+            )
 
         if add_eos:
-            tokens.append(self.token_to_id["<EOS>"])
+            tokens.append(
+                self.token_to_id["<EOS>"]
+            )
 
         return tokens
 
@@ -150,11 +111,13 @@ class BPETokenizer:
         for token_id in token_ids:
             token = self.id_to_token.get(
                 token_id,
-                "<UNK>",
+                "<UNK>"
             )
 
-            if token not in self.SPECIAL_TOKENS:
-                tokens.append(token)
+            if token in self.SPECIAL_TOKENS:
+                continue
+
+            tokens.append(token)
 
         return " ".join(tokens)
 
@@ -165,28 +128,38 @@ class BPETokenizer:
             "merges": self.merges,
         }
 
-        with open(path, "w", encoding="utf-8") as file:
+        with open(
+            path,
+            "w",
+            encoding="utf-8"
+        ) as file:
             json.dump(
                 data,
                 file,
                 indent=2,
-                ensure_ascii=False,
+                ensure_ascii=False
             )
 
     def load(self, path):
-        with open(path, "r", encoding="utf-8") as file:
+        with open(
+            path,
+            "r",
+            encoding="utf-8"
+        ) as file:
             data = json.load(file)
 
         self.vocab_size = data["vocab_size"]
-        self.token_to_id = data["token_to_id"]
+
         self.token_to_id = {
             token: int(token_id)
-            for token, token_id in self.token_to_id.items()
+            for token, token_id
+            in data["token_to_id"].items()
         }
 
         self.id_to_token = {
             token_id: token
-            for token, token_id in self.token_to_id.items()
+            for token, token_id
+            in self.token_to_id.items()
         }
 
         self.merges = [

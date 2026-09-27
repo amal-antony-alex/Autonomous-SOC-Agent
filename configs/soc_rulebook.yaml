@@ -1,0 +1,144 @@
+version: "1.0"
+
+rulebook:
+  name: "Autonomous SOC Analyst Rulebook"
+  description: "Initial SOC detection and triage rules"
+
+  rules:
+
+    - id: BRUTE_FORCE
+      name: "Brute Force Authentication"
+      description: "Multiple failed authentication attempts from the same source."
+      severity: High
+      mitre:
+        tactics:
+          - Credential Access
+        techniques:
+          - T1110
+        subtechniques:
+          - T1110.001
+      indicators:
+        rule_ids:
+          - "5710"
+          - "5760"
+        keywords:
+          - "failed password"
+          - "failed authentication"
+          - "authentication failure"
+          - "brute force"
+      investigation:
+        collect:
+          - source_ip
+          - username
+          - timestamp
+          - authentication_logs
+
+    - id: MALWARE
+      name: "Malware Detection"
+      description: "Alert indicating potentially malicious software or activity."
+      severity: Critical
+      mitre:
+        tactics:
+          - Execution
+          - Persistence
+      indicators:
+        keywords:
+          - "malware"
+          - "trojan"
+          - "ransomware"
+          - "virus"
+          - "malicious file"
+          - "suspicious executable"
+      investigation:
+        collect:
+          - file_name
+          - file_hash
+          - process_name
+          - parent_process
+          - source_ip
+
+    - id: SUSPICIOUS_POWERSHELL
+      name: "Suspicious PowerShell Activity"
+      description: "PowerShell command or behavior requiring investigation."
+      severity: High
+      mitre:
+        tactics:
+          - Execution
+        techniques:
+          - T1059
+        subtechniques:
+          - T1059.001
+      indicators:
+        keywords:
+          - "powershell"
+          - "encodedcommand"
+          - "-enc"
+          - "invoke-expression"
+          - "iex"
+          - "downloadstring"
+      investigation:
+        collect:
+          - command_line
+          - user
+          - parent_process
+          - process_id
+          - destination_ip
+
+    - id: PORT_SCANNING
+      name: "Port Scanning"
+      description: "Network behavior indicating possible reconnaissance."
+      severity: Medium
+      mitre:
+        tactics:
+          - Reconnaissance
+        techniques:
+          - T1046
+      indicators:
+        keywords:
+          - "port scan"
+          - "port scanning"
+          - "nmap"
+          - "scan detected"
+          - "multiple destination ports"
+      investigation:
+        collect:
+          - source_ip
+          - destination_ip
+          - destination_port
+          - protocol
+
+    - id: ACTIVE_DIRECTORY
+      name: "Active Directory Suspicious Activity"
+      description: "Suspicious authentication or directory activity."
+      severity: High
+      mitre:
+        tactics:
+          - Credential Access
+          - Discovery
+          - Lateral Movement
+      indicators:
+        keywords:
+          - "active directory"
+          - "domain controller"
+          - "kerberos"
+          - "ldap"
+          - "suspicious login"
+          - "privileged account"
+      investigation:
+        collect:
+          - source_ip
+          - username
+          - destination_ip
+          - authentication_method
+          - domain
+
+  severity_levels:
+    Critical: 4
+    High: 3
+    Medium: 2
+    Low: 1
+
+  decisions:
+    true_positive: "Continue investigation and create incident."
+    false_positive: "Suppress or tune matching rule."
+    uncertain: "Escalate for additional investigation or human review."
