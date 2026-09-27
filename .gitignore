@@ -38,3 +38,7 @@ build/
 docker-compose.override.yml
 .venv-linux/
 docker/wazuh/wazuh-docker/
+
+# RAG generated artifacts
+rag/embeddings/faiss.index
+rag/embeddings/metadata.npy
