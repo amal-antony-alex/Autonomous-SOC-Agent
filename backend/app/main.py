@@ -6,6 +6,7 @@ from app.models.alert import Alert
 from app.services.alert_normalizer import alert_normalizer
 from app.services.alert_deduplicator import alert_deduplicator
 from app.services.rulebook_engine import rulebook_engine
+from app.services.rag_service import rag_service
 
 
 app = FastAPI(
@@ -15,8 +16,6 @@ app = FastAPI(
 )
 
 
-# Temporary in-memory fingerprint store.
-# PostgreSQL will store the actual alert records.
 seen_fingerprints = set()
 
 
@@ -40,10 +39,18 @@ def receive_wazuh_alert(
     alert: dict,
     db: Session = Depends(get_db)
 ):
-    # Step 1: Normalize raw Wazuh alert
-    normalized_alert = alert_normalizer.normalize(alert)
+    # -----------------------------------
+    # 1. Normalize Wazuh alert
+    # -----------------------------------
 
-    # Step 2: Check for duplicate
+    normalized_alert = alert_normalizer.normalize(
+        alert
+    )
+
+    # -----------------------------------
+    # 2. Deduplicate alert
+    # -----------------------------------
+
     is_duplicate = alert_deduplicator.is_duplicate(
         normalized_alert,
         seen_fingerprints
@@ -55,42 +62,113 @@ def receive_wazuh_alert(
             "source": "wazuh"
         }
 
-    # Step 3: Evaluate alert against SOC rulebook
-    rulebook_matches = rulebook_engine.evaluate(alert)
+    # -----------------------------------
+    # 3. Evaluate SOC Rulebook
+    # -----------------------------------
 
-    # Step 4: Create database alert record
-    db_alert = Alert(
-        wazuh_alert_id=normalized_alert.get("alert_id"),
-        timestamp=normalized_alert.get("timestamp"),
-        rule_id=normalized_alert.get("rule_id"),
-        rule_level=normalized_alert.get("rule_level"),
-        rule_description=normalized_alert.get("rule_description"),
-        agent_id=normalized_alert.get("agent_id"),
-        agent_name=normalized_alert.get("agent_name"),
-        source_ip=normalized_alert.get("source_ip"),
-        destination_ip=normalized_alert.get("destination_ip"),
-        username=normalized_alert.get("source_user"),
-        full_log=normalized_alert.get("full_log"),
-        mitre_attack=normalized_alert.get("mitre"),
-        raw_json=normalized_alert.get("raw_alert")
+    rulebook_matches = rulebook_engine.evaluate(
+        alert
     )
 
-    # Step 5: Save alert to PostgreSQL
+    # -----------------------------------
+    # 4. Store alert in PostgreSQL
+    # -----------------------------------
+
+    db_alert = Alert(
+        wazuh_alert_id=normalized_alert.get(
+            "alert_id"
+        ),
+        timestamp=normalized_alert.get(
+            "timestamp"
+        ),
+        rule_id=normalized_alert.get(
+            "rule_id"
+        ),
+        rule_level=normalized_alert.get(
+            "rule_level"
+        ),
+        rule_description=normalized_alert.get(
+            "rule_description"
+        ),
+        agent_id=normalized_alert.get(
+            "agent_id"
+        ),
+        agent_name=normalized_alert.get(
+            "agent_name"
+        ),
+        source_ip=normalized_alert.get(
+            "source_ip"
+        ),
+        destination_ip=normalized_alert.get(
+            "destination_ip"
+        ),
+        username=normalized_alert.get(
+            "source_user"
+        ),
+        full_log=normalized_alert.get(
+            "full_log"
+        ),
+        decoder=normalized_alert.get(
+            "decoder"
+        ),
+        mitre_attack=normalized_alert.get(
+            "mitre"
+        ),
+        raw_json=normalized_alert.get(
+            "raw_alert"
+        )
+    )
+
     db.add(db_alert)
     db.commit()
     db.refresh(db_alert)
 
-    print("New Wazuh alert stored in PostgreSQL:")
+    # -----------------------------------
+    # 5. RAG investigation
+    # -----------------------------------
+
+    rag_result = rag_service.investigate(
+        normalized_alert
+    )
+
+    # -----------------------------------
+    # 6. Logging
+    # -----------------------------------
+
+    print(
+        "New Wazuh alert stored in PostgreSQL:"
+    )
     print(normalized_alert)
 
-    print("Rulebook matches:")
+    print(
+        "Rulebook matches:"
+    )
     print(rulebook_matches)
+
+    print(
+        "RAG investigation context:"
+    )
+    print(rag_result["context"])
+
+    # -----------------------------------
+    # 7. API response
+    # -----------------------------------
 
     return {
         "status": "accepted",
         "source": "wazuh",
         "duplicate": False,
         "database_id": db_alert.id,
+
         "rulebook_matches": rulebook_matches,
+
+        "rag": {
+            "query": rag_result["query"],
+            "retrieved_chunks": (
+                rag_result["retrieved_chunks"]
+            ),
+            "context": rag_result["context"]
+        },
+
         "alert": normalized_alert
     }
