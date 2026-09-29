@@ -1,58 +1,109 @@
 services:
 
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: socagent-backend
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: postgresql://socagent:socagent@postgres:5432/socagent
-      WAZUH_API_URL: ${WAZUH_API_URL}
-      WAZUH_API_USERNAME: ${WAZUH_API_USERNAME}
-      WAZUH_API_PASSWORD: ${WAZUH_API_PASSWORD}
-    depends_on:
-      - postgres
-    networks:
-      - project_default
-      - wazuh_network
-
   postgres:
     image: postgres:16
     container_name: socagent-postgres
     restart: unless-stopped
+
     environment:
       POSTGRES_USER: socagent
       POSTGRES_PASSWORD: socagent
       POSTGRES_DB: socagent
+
     ports:
       - "5432:5432"
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
     networks:
       - project_default
 
-  frontend:
-    build:
-      context: ./frontend
-    container_name: socagent-frontend
+
+  redis:
+    image: redis:7-alpine
+    container_name: socagent-redis
     restart: unless-stopped
+
     ports:
-      - "3000:3000"
-    depends_on:
-      - backend
+      - "6379:6379"
+
+    volumes:
+      - redis_data:/data
+
+    command: redis-server --appendonly yes
+
     networks:
       - project_default
 
-volumes:
-  postgres_data:
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+
+    container_name: socagent-backend
+    restart: unless-stopped
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      DATABASE_URL: postgresql://socagent:socagent@postgres:5432/socagent
+      REDIS_URL: redis://redis:6379/0
+      REDIS_QUEUE_NAME: soc_investigation_queue
+
+    depends_on:
+      - postgres
+      - redis
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - project_default
+      - wazuh_network
+
+
+  ai-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+
+    container_name: socagent-ai-worker
+    restart: unless-stopped
+
+    command: ["python", "-m", "app.ai_worker"]
+
+    environment:
+      DATABASE_URL: postgresql://socagent:socagent@postgres:5432/socagent
+      REDIS_URL: redis://redis:6379/0
+      REDIS_QUEUE_NAME: soc_investigation_queue
+
+    depends_on:
+      - postgres
+      - redis
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - project_default
+      - wazuh_network
+
 
 networks:
+
   project_default:
     driver: bridge
 
   wazuh_network:
     external: true
     name: single-node_default
+
+
+volumes:
+
+  postgres_data:
+
+  redis_data:

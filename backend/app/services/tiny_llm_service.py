@@ -9,7 +9,7 @@ from ai.tiny_llm.tokenizer.bpe_tokenizer import BPETokenizer
 class TinyLLMService:
     def __init__(self):
         project_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "../../../")
+            os.path.join(os.path.dirname(__file__), "../../")
         )
 
         self.checkpoint_path = os.path.join(
