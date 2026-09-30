@@ -42,3 +42,9 @@ docker/wazuh/wazuh-docker/
 # RAG generated artifacts
 rag/embeddings/faiss.index
 rag/embeddings/metadata.npy
+
+# Curated cybersecurity instruction dataset
+!data/raw/cybersecurity_instruction_dataset.jsonl
+
+# Curated cybersecurity instruction dataset
+!data/raw/cybersecurity_instruction_dataset.jsonl
