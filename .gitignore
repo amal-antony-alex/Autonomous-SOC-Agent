@@ -17,15 +17,15 @@ env/
 .DS_Store
 Thumbs.db
 
-# Data / Models
+# Data and generated model artifacts
 *.pt
 *.pth
 *.bin
 *.safetensors
-data/raw/
+data/raw/*
+!data/raw/cybersecurity_instruction_dataset.jsonl
 data/processed/
-# Generated model weights and checkpoints
-/models/
+ai/tiny_llm/checkpoints/
 
 # Logs
 *.log
