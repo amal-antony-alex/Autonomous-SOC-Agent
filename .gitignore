@@ -25,7 +25,7 @@ Thumbs.db
 data/raw/
 data/processed/
 # Generated model weights and checkpoints
-/ai/**/models/
+/models/
 
 # Logs
 *.log
