@@ -2,19 +2,54 @@ import re
 
 
 class EvidenceDecisionValidator:
+    VALID_SEVERITIES = {"Critical", "High", "Medium", "Low"}
+    VALID_DECISIONS = {"True Positive", "False Positive", "Uncertain"}
 
-    VALID_SEVERITIES = {
-        "Critical",
-        "High",
-        "Medium",
-        "Low",
+    SEVERITY_PRIORITY = {
+        "Critical": 4,
+        "High": 3,
+        "Medium": 2,
+        "Low": 1,
     }
 
-    VALID_DECISIONS = {
-        "True Positive",
-        "False Positive",
-        "Uncertain",
-    }
+    REPEATED_TERMS = [
+        "multiple failed attempts",
+        "multiple attempts",
+        "repeated failed attempts",
+        "repeated attempts",
+        "several failed attempts",
+        "numerous failed attempts",
+        "repeated authentication attempts",
+    ]
+
+    COMPROMISE_TERMS = [
+        "successful login",
+        "successful authentication",
+        "account compromised",
+        "account was compromised",
+        "system compromised",
+        "system was compromised",
+        "attacker gained access",
+        "attacker has gained access",
+        "unauthorized access was obtained",
+    ]
+
+    NEGATION_TERMS = [
+        "not supported",
+        "unsupported",
+        "no evidence",
+        "cannot confirm",
+        "can't confirm",
+        "not confirmed",
+        "not observed",
+        "not established",
+        "does not establish",
+        "does not indicate",
+        "not enough evidence",
+        "insufficient evidence",
+        "not demonstrated",
+        "not proven",
+    ]
 
     @staticmethod
     def _text(value):
@@ -26,55 +61,26 @@ class EvidenceDecisionValidator:
     def _build_alert_evidence(alert):
         evidence = []
 
-        if alert.get("rule_id"):
-            evidence.append(
-                f"Wazuh rule ID: {alert['rule_id']}"
-            )
+        fields = [
+            ("rule_id", "Wazuh rule ID"),
+            ("rule_description", "Rule description"),
+            ("rule_level", "Wazuh rule level"),
+            ("source_ip", "Source IP"),
+            ("source_user", "Source user"),
+            ("destination_ip", "Destination IP"),
+            ("destination_port", "Destination port"),
+            ("full_log", "Log"),
+        ]
 
-        if alert.get("rule_description"):
-            evidence.append(
-                f"Rule description: "
-                f"{alert['rule_description']}"
-            )
-
-        if alert.get("rule_level") is not None:
-            evidence.append(
-                f"Wazuh rule level: "
-                f"{alert['rule_level']}"
-            )
-
-        if alert.get("source_ip"):
-            evidence.append(
-                f"Source IP: {alert['source_ip']}"
-            )
-
-        if alert.get("source_user"):
-            evidence.append(
-                f"Source user: {alert['source_user']}"
-            )
-
-        if alert.get("destination_ip"):
-            evidence.append(
-                f"Destination IP: "
-                f"{alert['destination_ip']}"
-            )
-
-        if alert.get("destination_port"):
-            evidence.append(
-                f"Destination port: "
-                f"{alert['destination_port']}"
-            )
-
-        if alert.get("full_log"):
-            evidence.append(
-                f"Log: {alert['full_log']}"
-            )
+        for field, label in fields:
+            value = alert.get(field)
+            if value is not None and str(value).strip():
+                evidence.append(f"{label}: {value}")
 
         return evidence
 
     @staticmethod
     def _extract_failed_attempt_count(alert):
-
         text = " ".join([
             EvidenceDecisionValidator._text(
                 alert.get("rule_description")
@@ -96,52 +102,56 @@ class EvidenceDecisionValidator:
         ]
 
         for pattern in patterns:
-
-            match = re.search(
-                pattern,
-                text
-            )
-
+            match = re.search(pattern, text)
             if match:
-                return int(
-                    match.group(1)
-                )
+                return int(match.group(1))
 
         return None
 
     @staticmethod
-    def _correlation_supports_repeated_attempts(
-        correlation_result
-    ):
-
+    def _correlation_supports_repeated_attempts(correlation_result):
         if not correlation_result:
             return False
 
-        alert_count = correlation_result.get(
-            "alert_count",
-            0
-        )
+        try:
+            return int(correlation_result.get("alert_count", 0)) > 1
+        except (TypeError, ValueError):
+            return False
 
-        return alert_count > 1
+    @staticmethod
+    def _phrase_is_affirmed(text, phrase):
+        """
+        Check whether a phrase appears in a sentence without
+        an obvious negation or uncertainty qualifier.
+        This is a lightweight guard, not a full NLP model.
+        """
+        sentences = re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
+
+        for sentence in sentences:
+            if phrase not in sentence:
+                continue
+
+            if any(
+                negation in sentence
+                for negation in EvidenceDecisionValidator.NEGATION_TERMS
+            ):
+                continue
+
+            return True
+
+        return False
 
     @staticmethod
     def _validate_qwen_claims(
         alert,
         qwen_analysis,
-        correlation_result=None
+        correlation_result=None,
     ):
-
         unsupported_claims = []
-
-        text = EvidenceDecisionValidator._text(
-            qwen_analysis
-        )
+        text = EvidenceDecisionValidator._text(qwen_analysis)
 
         failed_attempt_count = (
-            EvidenceDecisionValidator
-            ._extract_failed_attempt_count(
-                alert
-            )
+            EvidenceDecisionValidator._extract_failed_attempt_count(alert)
         )
 
         correlation_supports_repeated = (
@@ -151,36 +161,15 @@ class EvidenceDecisionValidator:
             )
         )
 
-        repeated_terms = [
-            "multiple failed attempts",
-            "multiple attempts",
-            "repeated failed attempts",
-            "repeated attempts",
-            "several failed attempts",
-            "numerous failed attempts",
-            "repeated authentication attempts",
-        ]
-
         if (
             failed_attempt_count is None
             and not correlation_supports_repeated
         ):
-
-            for term in repeated_terms:
-
-                if term in text:
-
+            for term in EvidenceDecisionValidator.REPEATED_TERMS:
+                if EvidenceDecisionValidator._phrase_is_affirmed(text, term):
                     unsupported_claims.append(
                         f"Unsupported claim: '{term}'"
                     )
-
-        compromise_terms = [
-            "successful login",
-            "successful authentication",
-            "account compromised",
-            "system compromised",
-            "attacker gained access",
-        ]
 
         alert_text = " ".join([
             EvidenceDecisionValidator._text(
@@ -191,13 +180,11 @@ class EvidenceDecisionValidator:
             ),
         ])
 
-        for term in compromise_terms:
-
+        for term in EvidenceDecisionValidator.COMPROMISE_TERMS:
             if (
-                term in text
+                EvidenceDecisionValidator._phrase_is_affirmed(text, term)
                 and term not in alert_text
             ):
-
                 unsupported_claims.append(
                     f"Unsupported claim: '{term}'"
                 )
@@ -205,91 +192,99 @@ class EvidenceDecisionValidator:
         return unsupported_claims
 
     @staticmethod
-    def _determine_severity(
-        alert,
-        rulebook_matches
-    ):
+    def _determine_severity(alert, rulebook_matches):
+        severities = []
 
-        if rulebook_matches:
+        for match in rulebook_matches or []:
+            severity = match.get("severity")
+            if severity in EvidenceDecisionValidator.VALID_SEVERITIES:
+                severities.append(severity)
 
-            severities = []
+        if severities:
+            return max(
+                severities,
+                key=lambda value:
+                EvidenceDecisionValidator.SEVERITY_PRIORITY[value],
+            )
 
-            for match in rulebook_matches:
+        rule_level = alert.get("rule_level")
 
-                severity = match.get(
-                    "severity"
-                )
-
-                if (
-                    severity
-                    in EvidenceDecisionValidator
-                    .VALID_SEVERITIES
-                ):
-
-                    severities.append(
-                        severity
-                    )
-
-            priority = {
-                "Critical": 4,
-                "High": 3,
-                "Medium": 2,
-                "Low": 1,
-            }
-
-            if severities:
-
-                return max(
-                    severities,
-                    key=lambda value:
-                    priority[value]
-                )
-
-        rule_level = alert.get(
-            "rule_level"
-        )
-
-        if isinstance(
-            rule_level,
-            int
-        ):
-
-            if rule_level >= 12:
-                return "Critical"
-
-            if rule_level >= 7:
-                return "High"
-
-            if rule_level >= 4:
-                return "Medium"
-
+        try:
+            rule_level = int(rule_level)
+        except (TypeError, ValueError):
             return "Low"
 
+        if rule_level >= 12:
+            return "Critical"
+        if rule_level >= 7:
+            return "High"
+        if rule_level >= 4:
+            return "Medium"
         return "Low"
+
+    @staticmethod
+    def _is_known_informational_startup(alert, rulebook_matches):
+        """
+        Recognize the specific Wazuh manager-startup event observed
+        in this project. Do not generalize this exception to all
+        unmatched low-severity alerts.
+        """
+        rule_id = str(alert.get("rule_id", "")).strip()
+        description = EvidenceDecisionValidator._text(
+            alert.get("rule_description")
+        )
+
+        return (
+            rule_id == "502"
+            and "started" in description
+            and not rulebook_matches
+        )
+
+    @staticmethod
+    def _is_brute_force_match(rulebook_matches):
+        return any(
+            str(match.get("rule_id", "")).upper() == "BRUTE_FORCE"
+            for match in (rulebook_matches or [])
+        )
 
     @staticmethod
     def _determine_decision(
         alert,
         rulebook_matches,
-        unsupported_claims
+        unsupported_claims,
+        correlation_result=None,
     ):
-
         if unsupported_claims:
             return "Uncertain"
+
+        if EvidenceDecisionValidator._is_known_informational_startup(
+            alert, rulebook_matches
+        ):
+            return "False Positive"
 
         if not rulebook_matches:
             return "Uncertain"
 
-        evidence = (
-            EvidenceDecisionValidator
-            ._build_alert_evidence(
+        evidence = EvidenceDecisionValidator._build_alert_evidence(alert)
+        if not evidence:
+            return "Uncertain"
+
+        if EvidenceDecisionValidator._is_brute_force_match(
+            rulebook_matches
+        ):
+            count = EvidenceDecisionValidator._extract_failed_attempt_count(
                 alert
             )
-        )
+            repeated = (
+                count is not None and count > 1
+            ) or EvidenceDecisionValidator._correlation_supports_repeated_attempts(
+                correlation_result
+            )
 
-        if evidence:
-            return "True Positive"
+            return "True Positive" if repeated else "Uncertain"
 
+        # Keyword-only matches such as "powershell" are not enough
+        # to confirm malicious activity.
         return "Uncertain"
 
     def validate(
@@ -297,36 +292,26 @@ class EvidenceDecisionValidator:
         alert,
         rulebook_matches,
         qwen_analysis,
-        correlation_result=None
+        correlation_result=None,
     ):
+        alert_evidence = self._build_alert_evidence(alert)
 
-        alert_evidence = (
-            self._build_alert_evidence(
-                alert
-            )
+        unsupported_claims = self._validate_qwen_claims(
+            alert,
+            qwen_analysis,
+            correlation_result,
         )
 
-        unsupported_claims = (
-            self._validate_qwen_claims(
-                alert,
-                qwen_analysis,
-                correlation_result
-            )
+        severity = self._determine_severity(
+            alert,
+            rulebook_matches,
         )
 
-        severity = (
-            self._determine_severity(
-                alert,
-                rulebook_matches
-            )
-        )
-
-        decision = (
-            self._determine_decision(
-                alert,
-                rulebook_matches,
-                unsupported_claims
-            )
+        decision = self._determine_decision(
+            alert,
+            rulebook_matches,
+            unsupported_claims,
+            correlation_result,
         )
 
         correlation_supported = (
@@ -340,12 +325,8 @@ class EvidenceDecisionValidator:
             "severity": severity,
             "evidence": alert_evidence,
             "unsupported_claims": unsupported_claims,
-            "evidence_grounded": (
-                len(unsupported_claims) == 0
-            ),
-            "correlation_supported": (
-                correlation_supported
-            ),
+            "evidence_grounded": not unsupported_claims,
+            "correlation_supported": correlation_supported,
         }
 
 
