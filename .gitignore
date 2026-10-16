@@ -24,7 +24,8 @@ Thumbs.db
 *.safetensors
 data/raw/
 data/processed/
-models/
+# Generated model weights and checkpoints
+/ai/**/models/
 
 # Logs
 *.log
