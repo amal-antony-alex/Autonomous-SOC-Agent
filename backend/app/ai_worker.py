@@ -16,6 +16,7 @@ def persist_investigation(
     correlation_result,
     result=None,
     error=None,
+    started_at=None,
 ):
     """Persist investigation findings and create incidents only for validated TPs."""
     db = SessionLocal()
@@ -87,8 +88,18 @@ def persist_investigation(
             "response_actions_executed": False,
         }
 
+        started_at = started_at or datetime.now(
+            timezone.utc
+        ).replace(tzinfo=None)
+        completed_at = max(
+            datetime.now(timezone.utc).replace(tzinfo=None),
+            started_at,
+        )
+
         investigation = Investigation(
             incident_id=incident.id if incident else None,
+            started_at=started_at,
+            completed_at=completed_at,
             investigation_type="AI Alert Investigation",
             findings=json.dumps(findings, default=str),
             confidence={
@@ -96,7 +107,6 @@ def persist_investigation(
                 "False Positive": "Medium",
                 "Uncertain": "Low",
             }.get(decision, "Low"),
-            completed_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
 
         db.add(investigation)
@@ -122,27 +132,32 @@ def persist_investigation(
         db.close()
 
 
+
 def process_alert(task):
     normalized_alert = task["normalized_alert"]
     rulebook_matches = task["rulebook_matches"]
     db_alert_id = task["db_alert_id"]
-
-    print("Starting alert correlation...", flush=True)
-
-    correlation_result = alert_correlator.correlate(
-        normalized_alert
-    )
-
-    print(
-        "Alert correlation completed: "
-        f"count={correlation_result.get('alert_count')}, "
-        f"source_ip={correlation_result.get('source_ip')}",
-        flush=True,
-    )
+    investigation_started_at = datetime.now(
+        timezone.utc
+    ).replace(tzinfo=None)
 
     result = None
+    correlation_result = None
 
     try:
+        print("Starting alert correlation...", flush=True)
+
+        correlation_result = alert_correlator.correlate(
+            normalized_alert
+        )
+
+        print(
+            "Alert correlation completed: "
+            f"count={correlation_result.get('alert_count')}, "
+            f"source_ip={correlation_result.get('source_ip')}",
+            flush=True,
+        )
+
         print(
             f"AI investigation started for database alert {db_alert_id}",
             flush=True,
@@ -178,12 +193,14 @@ def process_alert(task):
             rulebook_matches=rulebook_matches,
             correlation_result=correlation_result,
             result=result,
+            started_at=investigation_started_at,
         )
 
         print(
             f"AI investigation completed and saved: {investigation_id}",
             flush=True,
         )
+        return True
 
     except Exception as error:
         print(
@@ -198,23 +215,30 @@ def process_alert(task):
                 db_alert_id=db_alert_id,
                 normalized_alert=normalized_alert,
                 rulebook_matches=rulebook_matches,
-                correlation_result=correlation_result,
+                correlation_result=correlation_result or {},
                 result=result,
                 error=f"{type(error).__name__}: {error}",
+                started_at=investigation_started_at,
             )
             print(
                 f"Failure record saved: {investigation_id}",
                 flush=True,
             )
+            # The failure is durably recorded, so this task is handled.
+            return True
+
         except Exception:
             print(
-                "Could not persist investigation failure record.",
+                "Could not persist investigation failure record. "
+                "Task must remain recoverable.",
                 flush=True,
             )
             traceback.print_exc()
-
+            return False
 
 def main():
+    import time
+
     print(
         "Redis AI investigation worker started.",
         flush=True,
@@ -224,19 +248,71 @@ def main():
         flush=True,
     )
 
+    recovered = redis_queue.recover_processing()
+    print(
+        f"Recovered {recovered} unacknowledged task(s).",
+        flush=True,
+    )
+
     while True:
-        task = redis_queue.dequeue(timeout=5)
+        task = redis_queue.reserve(timeout=5)
 
         if task is None:
             continue
 
-        print("Task received from Redis.", flush=True)
+        print("Task reserved from Redis.", flush=True)
         print(
-            f"Remaining queue size: {redis_queue.size()}",
+            f"Remaining pending queue size: {redis_queue.size()}",
             flush=True,
         )
 
-        process_alert(task)
+        try:
+            handled = process_alert(task)
+
+            if handled:
+                acknowledged = redis_queue.acknowledge(task)
+
+                if not acknowledged:
+                    print(
+                        "Warning: task outcome was recorded, but its "
+                        "processing entry was not acknowledged.",
+                        flush=True,
+                    )
+            else:
+                released = redis_queue.release(task)
+
+                if released:
+                    print(
+                        "Task returned to pending queue after "
+                        "unsuccessful persistence.",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "Warning: task could not be released. "
+                        "It remains eligible for startup recovery.",
+                        flush=True,
+                    )
+                    time.sleep(5)
+
+                time.sleep(5)
+
+        except Exception as error:
+            print(
+                "Queue handling error: "
+                f"{type(error).__name__}: {error}",
+                flush=True,
+            )
+            traceback.print_exc()
+
+            # If the task is still in processing, try to return it
+            # to pending. If Redis is unavailable, startup recovery
+            # can recover it after a worker restart.
+            try:
+                redis_queue.release(task)
+            except Exception:
+                traceback.print_exc()
+                time.sleep(5)
 
 
 if __name__ == "__main__":

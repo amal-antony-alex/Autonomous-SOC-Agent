@@ -52,6 +52,9 @@ services:
       DATABASE_URL: postgresql://socagent:socagent@postgres:5432/socagent
       REDIS_URL: redis://redis:6379/0
       REDIS_QUEUE_NAME: soc_investigation_queue
+      SOC_REVIEWER_TOKEN: ${SOC_REVIEWER_TOKEN:?SOC_REVIEWER_TOKEN must be set in .env}
+      SOC_REVIEWER_ID: ${SOC_REVIEWER_ID:-soc-analyst}
+
 
     depends_on:
       - postgres

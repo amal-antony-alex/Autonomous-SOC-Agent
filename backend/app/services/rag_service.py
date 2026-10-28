@@ -1,3 +1,6 @@
+
+import time
+
 from rag.retriever.rag_pipeline import RAGPipeline
 
 from app.services.tiny_llm_service import tiny_llm_service
@@ -12,7 +15,6 @@ class RAGService:
 
     @staticmethod
     def build_query(alert, correlation_result=None):
-
         parts = [
             alert.get("rule_description"),
             alert.get("full_log"),
@@ -38,83 +40,71 @@ class RAGService:
     def build_llm_prompt(
         alert,
         context,
-        correlation_result=None
+        correlation_result=None,
     ):
+        correlation_result = correlation_result or {}
 
-        correlation_text = "No correlated alerts."
+        related_alerts = correlation_result.get(
+            "related_alerts", []
+        )
 
-        if correlation_result:
+        correlation_lines = [
+            f"Correlated alert count: "
+            f"{correlation_result.get('alert_count', 1)}",
+            f"Correlation window: "
+            f"{correlation_result.get('window_minutes', 'unknown')} minutes",
+        ]
 
-            related_alerts = (
-                correlation_result.get(
-                    "related_alerts",
-                    []
-                )
+        for related in related_alerts[:5]:
+            correlation_lines.append(
+                "- "
+                f"Alert ID: {related.get('alert_id')}; "
+                f"Rule ID: {related.get('rule_id')}; "
+                f"Timestamp: {related.get('timestamp')}; "
+                f"User: {related.get('source_user')}"
             )
 
-            correlation_text = (
-                f"Correlation window: "
-                f"{correlation_result.get('window_minutes')} minutes\n"
-                f"Correlated alert count: "
-                f"{correlation_result.get('alert_count', 0)}\n"
+        if len(related_alerts) > 5:
+            correlation_lines.append(
+                f"- {len(related_alerts) - 5} additional related alerts "
+                "omitted from this prompt."
             )
 
-            if related_alerts:
+        input_text = f"""
+CURRENT WAZUH ALERT
+Rule ID: {alert.get('rule_id')}
+Rule Description: {alert.get('rule_description')}
+Rule Level: {alert.get('rule_level')}
+Source IP: {alert.get('source_ip')}
+Destination IP: {alert.get('destination_ip')}
+Destination Port: {alert.get('destination_port')}
+Username: {alert.get('source_user')}
+Full Log: {alert.get('full_log')}
 
-                correlation_text += (
-                    "\nRelated alerts:\n"
-                )
+CORRELATION EVIDENCE
+{chr(10).join(correlation_lines)}
 
-                for related in related_alerts:
-
-                    correlation_text += (
-                        f"- Alert ID: "
-                        f"{related.get('alert_id')}, "
-                        f"Rule ID: "
-                        f"{related.get('rule_id')}, "
-                        f"Timestamp: "
-                        f"{related.get('timestamp')}, "
-                        f"User: "
-                        f"{related.get('source_user')}\n"
-                    )
-
-        return f"""
-You are a cybersecurity SOC analyst.
-
-Analyze the following Wazuh alert using the supplied security
-knowledge and alert correlation evidence.
-
-=== SECURITY KNOWLEDGE ===
+RETRIEVED SECURITY KNOWLEDGE
 {context}
+""".strip()
 
-=== CURRENT WAZUH ALERT ===
-Rule ID: {alert.get("rule_id")}
-Rule Description: {alert.get("rule_description")}
-Rule Level: {alert.get("rule_level")}
-Source IP: {alert.get("source_ip")}
-Username: {alert.get("source_user")}
-Full Log: {alert.get("full_log")}
-
-=== ALERT CORRELATION ===
-{correlation_text}
-
-Important:
-- Only claim repeated or multiple attempts when the correlation
-  evidence actually shows multiple related alerts.
-- Do not invent evidence.
-- Distinguish the current alert from related alerts.
-
-Provide a preliminary SOC analysis.
-Identify the likely security event and the relevant evidence.
-"""
+        return (
+            "Instruction:\n"
+            "Analyze this SOC alert using only the supplied evidence. "
+            "Identify the likely security event, cite relevant evidence, "
+            "and state what remains uncertain. Do not invent indicators "
+            "or claim malicious activity without sufficient evidence.\n\n"
+            "Input:\n"
+            f"{input_text}\n\n"
+            "Response:\n"
+        )
 
     def investigate(
         self,
         alert,
         rulebook_matches=None,
-        correlation_result=None
+        correlation_result=None,
     ):
-
         if rulebook_matches is None:
             rulebook_matches = []
 
@@ -122,73 +112,93 @@ Identify the likely security event and the relevant evidence.
             correlation_result = {
                 "correlated": False,
                 "alert_count": 1,
-                "related_alerts": []
+                "related_alerts": [],
             }
 
+        # Build the retrieval query.
         query = self.build_query(
             alert,
-            correlation_result=correlation_result
+            correlation_result=correlation_result,
         )
+
+        # Stage 1: RAG context retrieval.
+        stage_started = time.perf_counter()
 
         result = self.pipeline.build_context(
             query=query,
             alert=alert,
-            top_k=3
+            top_k=3,
+        )
+
+        print(
+            f"PERF context_retrieval="
+            f"{time.perf_counter() - stage_started:.3f}s",
+            flush=True,
         )
 
         llm_prompt = self.build_llm_prompt(
             alert,
             result["context"],
-            correlation_result=correlation_result
+            correlation_result=correlation_result,
         )
 
-        # --------------------------------------------------
-        # Tiny CyberLLM
-        # --------------------------------------------------
+        # Stage 2: Tiny CyberLLM preliminary analysis.
+        stage_started = time.perf_counter()
 
-        preliminary_analysis = (
-            tiny_llm_service.generate(
-                llm_prompt,
-                max_new_tokens=30
-            )
+        preliminary_analysis = tiny_llm_service.generate(
+            llm_prompt,
+            max_new_tokens=80,
+        )
+
+        print(
+            f"PERF tiny_cyberllm="
+            f"{time.perf_counter() - stage_started:.3f}s",
+            flush=True,
         )
 
         result["tiny_cyberllm"] = {
             "prompt": llm_prompt,
-            "analysis": preliminary_analysis
+            "analysis": preliminary_analysis,
         }
 
-        # --------------------------------------------------
-        # Qwen Verification
-        # --------------------------------------------------
+        # Stage 3: Qwen cross-verification.
+        stage_started = time.perf_counter()
 
         qwen_analysis = qwen_service.verify(
             alert=alert,
             security_context=result["context"],
             tiny_llm_analysis=preliminary_analysis,
-            correlation_result=correlation_result
+            correlation_result=correlation_result,
+        )
+
+        print(
+            f"PERF qwen_verification="
+            f"{time.perf_counter() - stage_started:.3f}s",
+            flush=True,
         )
 
         result["qwen_verification"] = {
             "model": qwen_service.model,
-            "analysis": qwen_analysis
+            "analysis": qwen_analysis,
         }
 
-        # --------------------------------------------------
-        # Evidence Validation
-        # --------------------------------------------------
+        # Stage 4: Evidence validation.
+        stage_started = time.perf_counter()
 
-        validation = evidence_validator.validate(
+        validation_result = evidence_validator.validate(
             alert=alert,
             rulebook_matches=rulebook_matches,
             qwen_analysis=qwen_analysis,
-            correlation_result=correlation_result
+            correlation_result=correlation_result,
         )
 
-        result["evidence_validation"] = validation
+        print(
+            f"PERF evidence_validation="
+            f"{time.perf_counter() - stage_started:.3f}s",
+            flush=True,
+        )
 
-        # Keep correlation available in the final result
-        result["alert_correlation"] = correlation_result
+        result["evidence_validation"] = validation_result
 
         return result
 

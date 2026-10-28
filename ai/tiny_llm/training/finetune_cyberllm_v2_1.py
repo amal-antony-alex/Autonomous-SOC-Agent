@@ -15,14 +15,18 @@ from ai.tiny_llm.training.cyberllm_v2_dataset import CyberLLMv2Dataset
 
 TRAIN_FILE = Path("data/processed/cyberllm_v2/train.jsonl")
 VAL_FILE = Path("data/processed/cyberllm_v2/val.jsonl")
+
 TOKENIZER_FILE = Path(
     "ai/tiny_llm/tokenizer/artifacts/cyber_bpe/tokenizer.json"
 )
+
 BASE_CHECKPOINT = Path(
     "ai/tiny_llm/checkpoints/cyberllm_v2_shifted_best.pt"
 )
+
+# Preserve the v2.1 checkpoint and save this experiment separately.
 OUTPUT_CHECKPOINT = Path(
-    "ai/tiny_llm/checkpoints/cyberllm_v2_1_soc_balanced_best.pt"
+    "ai/tiny_llm/checkpoints/cyberllm_v2_2_soc_metrics_best.pt"
 )
 
 MAX_SEQ_LEN = 512
@@ -32,8 +36,6 @@ LEARNING_RATE = 1e-5
 GRAD_CLIP = 1.0
 SEED = 42
 
-# Increase SOC exposure without discarding MITRE examples.
-# These are sampling weights, not changes to the dataset.
 SOC_WEIGHT = 10.0
 MITRE_WEIGHT = 1.0
 
@@ -42,77 +44,108 @@ def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
 
 def causal_loss(logits, labels, criterion):
-    # Predict the next token, not the token at the same position.
+    """Next-token loss with prompt positions ignored."""
     shift_logits = logits[:, :-1, :].contiguous()
     shift_labels = labels[:, 1:].contiguous()
 
     return criterion(
-        shift_logits.view(-1, shift_logits.size(-1)),
-        shift_labels.view(-1),
+        shift_logits.reshape(-1, shift_logits.size(-1)),
+        shift_labels.reshape(-1),
     )
 
 
 def make_sampler(dataset):
     weights = []
-
-    soc_count = 0
-    mitre_count = 0
+    source_counts = {}
 
     for example in dataset.examples:
         source = example.get("source", "unknown")
 
         if source == "curated_soc":
             weights.append(SOC_WEIGHT)
-            soc_count += 1
         elif source == "mitre_attack":
             weights.append(MITRE_WEIGHT)
-            mitre_count += 1
         else:
             weights.append(1.0)
 
-    print(f"SOC examples: {soc_count}")
-    print(f"MITRE examples: {mitre_count}")
+        source_counts[source] = source_counts.get(source, 0) + 1
+
+    print("\n===== SAMPLER CONFIGURATION =====")
+    for source, count in sorted(source_counts.items()):
+        print(f"{source}: {count}")
+
     print(f"SOC sampling weight: {SOC_WEIGHT}")
     print(f"MITRE sampling weight: {MITRE_WEIGHT}")
 
-    sampler = WeightedRandomSampler(
+    return WeightedRandomSampler(
         weights=weights,
         num_samples=len(dataset),
         replacement=True,
         generator=torch.Generator().manual_seed(SEED),
     )
 
-    return sampler
 
+def evaluate_by_source(model, dataset, criterion, device):
+    """
+    Evaluate each source independently.
 
-def evaluate(model, loader, criterion, device):
+    Batches remain size 1 because examples have variable sequence lengths.
+    Losses are averaged per example, matching the existing evaluation style.
+    """
     model.eval()
-    total_loss = 0.0
-    batches = 0
+
+    source_totals = {}
+    source_counts = {}
 
     with torch.no_grad():
-        for batch in loader:
-            input_ids = batch["input_ids"].to(device)
-            labels = batch["labels"].to(device)
+        for index in range(len(dataset)):
+            batch = dataset[index]
+            input_ids = batch["input_ids"].unsqueeze(0).to(device)
+            labels = batch["labels"].unsqueeze(0).to(device)
 
             logits = model(input_ids)
             loss = causal_loss(logits, labels, criterion)
 
-            total_loss += loss.item()
-            batches += 1
+            source = dataset.examples[index].get("source", "unknown")
+            source_totals[source] = (
+                source_totals.get(source, 0.0) + loss.item()
+            )
+            source_counts[source] = source_counts.get(source, 0) + 1
 
-    return total_loss / max(batches, 1)
+    source_means = {
+        source: source_totals[source] / source_counts[source]
+        for source in source_totals
+    }
+
+    total_count = sum(source_counts.values())
+    overall = (
+        sum(source_totals.values()) / total_count
+        if total_count
+        else float("inf")
+    )
+
+    return overall, source_means, source_counts
 
 
 def main():
-    print("===== CYBERLLM V2.1 SOC-BALANCED FINE-TUNING =====")
+    print("===== CYBERLLM V2.2 SOURCE-METRICS EXPERIMENT =====")
 
     set_seed(SEED)
+
+    if not TRAIN_FILE.exists():
+        raise FileNotFoundError(f"Training data missing: {TRAIN_FILE}")
+    if not VAL_FILE.exists():
+        raise FileNotFoundError(f"Validation data missing: {VAL_FILE}")
+    if not TOKENIZER_FILE.exists():
+        raise FileNotFoundError(f"Tokenizer missing: {TOKENIZER_FILE}")
+    if not BASE_CHECKPOINT.exists():
+        raise FileNotFoundError(f"Baseline checkpoint missing: {BASE_CHECKPOINT}")
 
     device = torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
@@ -133,20 +166,17 @@ def main():
     print(f"Training examples: {len(train_dataset)}")
     print(f"Validation examples: {len(val_dataset)}")
 
-    sampler = make_sampler(train_dataset)
-
     train_loader = DataLoader(
         train_dataset,
         batch_size=BATCH_SIZE,
-        sampler=sampler,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
+        sampler=make_sampler(train_dataset),
     )
 
-    base = torch.load(BASE_CHECKPOINT, map_location=device)
+    base = torch.load(
+        BASE_CHECKPOINT,
+        map_location=device,
+        weights_only=False,
+    )
 
     model = TinyLLMSmall(
         vocab_size=base["vocab_size"],
@@ -166,6 +196,8 @@ def main():
     best_val_loss = float("inf")
     best_epoch = 0
 
+    OUTPUT_CHECKPOINT.parent.mkdir(parents=True, exist_ok=True)
+
     print("\n===== TRAINING =====")
 
     for epoch in range(1, EPOCHS + 1):
@@ -177,11 +209,19 @@ def main():
             input_ids = batch["input_ids"].to(device)
             labels = batch["labels"].to(device)
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
+
             logits = model(input_ids)
             loss = causal_loss(logits, labels, criterion)
 
+            if not torch.isfinite(loss):
+                raise RuntimeError(
+                    f"Non-finite training loss at epoch {epoch}, "
+                    f"batch {batches + 1}"
+                )
+
             loss.backward()
+
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), GRAD_CLIP
             )
@@ -191,18 +231,29 @@ def main():
             batches += 1
 
         train_loss = total_train_loss / max(batches, 1)
-        val_loss = evaluate(
-            model, val_loader, criterion, device
+
+        overall_val, source_losses, source_counts = evaluate_by_source(
+            model, val_dataset, criterion, device
         )
+
+        soc_loss = source_losses.get("curated_soc", float("nan"))
+        mitre_loss = source_losses.get("mitre_attack", float("nan"))
 
         print(
             f"Epoch {epoch:02d} | "
-            f"Train Loss: {train_loss:.4f} | "
-            f"Val Loss: {val_loss:.4f}"
+            f"Train: {train_loss:.4f} | "
+            f"Val overall: {overall_val:.4f} | "
+            f"Val SOC: {soc_loss:.4f} "
+            f"(n={source_counts.get('curated_soc', 0)}) | "
+            f"Val MITRE: {mitre_loss:.4f} "
+            f"(n={source_counts.get('mitre_attack', 0)})"
         )
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        # Keep checkpoint selection based on overall validation loss
+        # for comparability with the previous experiment. SOC loss is
+        # reported separately rather than silently changing the criterion.
+        if overall_val < best_val_loss:
+            best_val_loss = overall_val
             best_epoch = epoch
 
             torch.save(
@@ -211,10 +262,14 @@ def main():
                     "vocab_size": tokenizer.vocab_size,
                     "max_seq_len": MAX_SEQ_LEN,
                     "epoch": epoch,
-                    "val_loss": val_loss,
+                    "val_loss": overall_val,
+                    "val_soc_loss": soc_loss,
+                    "val_mitre_loss": mitre_loss,
+                    "val_soc_examples": source_counts.get("curated_soc", 0),
+                    "val_mitre_examples": source_counts.get("mitre_attack", 0),
                     "learning_rate": LEARNING_RATE,
                     "base_checkpoint": str(BASE_CHECKPOINT),
-                    "model_type": "CyberLLM-v2.1-SOC-balanced",
+                    "model_type": "CyberLLM-v2.2-source-metrics",
                     "loss_objective": "response_only_shifted_causal",
                     "train_examples": len(train_dataset),
                     "val_examples": len(val_dataset),
@@ -224,10 +279,10 @@ def main():
                 },
                 OUTPUT_CHECKPOINT,
             )
-            print("  -> Best checkpoint saved.")
+            print("  -> Best overall-validation checkpoint saved.")
 
     print("\n===== TRAINING COMPLETE =====")
-    print(f"Best validation loss: {best_val_loss:.4f}")
+    print(f"Best overall validation loss: {best_val_loss:.4f}")
     print(f"Best epoch: {best_epoch}")
     print(f"Checkpoint: {OUTPUT_CHECKPOINT}")
 

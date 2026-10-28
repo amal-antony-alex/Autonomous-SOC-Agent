@@ -10,10 +10,7 @@ class AlertNormalizer:
         data = alert.get("data", {})
 
         normalized = {
-            "timestamp": alert.get(
-                "timestamp",
-                datetime.now(timezone.utc).isoformat()
-            ),
+            "timestamp": alert.get("timestamp"),
 
             "source": "wazuh",
 

@@ -1,0 +1,61 @@
+{
+  "base_model": {
+    "checkpoint": "ai/tiny_llm/checkpoints/cyberllm_v2_2_soc_metrics_best.pt",
+    "examples_evaluated": 391,
+    "overall_mean_example_loss": 6.734677763546214,
+    "category_mean_example_loss": {
+      "alert_analysis": 6.1140697456541515,
+      "alert_correlation": 7.020691335201263,
+      "false_positive_assessment": 6.8533909797668455,
+      "incident_summary": 6.969815740585327,
+      "ioc_analysis": 6.6006489604352465,
+      "mitre_mapping": 6.591104655038743,
+      "severity_classification": 6.9988180290568955,
+      "uncertainty_analysis": 6.767147938410441
+    },
+    "category_example_counts": {
+      "alert_analysis": 42,
+      "alert_correlation": 48,
+      "false_positive_assessment": 40,
+      "incident_summary": 50,
+      "ioc_analysis": 83,
+      "mitre_mapping": 42,
+      "severity_classification": 44,
+      "uncertainty_analysis": 42
+    }
+  },
+  "fine_tuned_model": {
+    "checkpoint": "ai/tiny_llm/checkpoints/soc_curated_v3_splits_v2/best_validation.pt",
+    "examples_evaluated": 391,
+    "overall_mean_example_loss": 4.164780677127107,
+    "category_mean_example_loss": {
+      "alert_analysis": 3.7676950295766196,
+      "alert_correlation": 4.26715686917305,
+      "false_positive_assessment": 3.666556179523468,
+      "incident_summary": 4.2254673194885255,
+      "ioc_analysis": 4.465822173888425,
+      "mitre_mapping": 4.179018327168056,
+      "severity_classification": 3.905632121996446,
+      "uncertainty_analysis": 4.509454454694476
+    },
+    "category_example_counts": {
+      "alert_analysis": 42,
+      "alert_correlation": 48,
+      "false_positive_assessment": 40,
+      "incident_summary": 50,
+      "ioc_analysis": 83,
+      "mitre_mapping": 42,
+      "severity_classification": 44,
+      "uncertainty_analysis": 42
+    }
+  },
+  "comparison": {
+    "base_loss": 6.734677763546214,
+    "fine_tuned_loss": 4.164780677127107,
+    "absolute_loss_change": -2.5698970864191075,
+    "relative_loss_reduction_percent": 38.15916925275281,
+    "test_examples": 391,
+    "test_used_for_training_or_checkpoint_selection": false,
+    "interpretation_note": "Lower test loss indicates better next-token prediction on this dataset; it does not by itself establish factual correctness."
+  }
+}

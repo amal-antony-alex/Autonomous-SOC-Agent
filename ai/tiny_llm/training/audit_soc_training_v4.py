@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Independent audit for SOC training v4 candidate dataset."""
+import json, re
+from collections import Counter
+from pathlib import Path
+
+ROOT = Path("data/raw/soc_curated_v3")
+DATA = ROOT / "soc_training_v4.jsonl"
+ATTACK = Path("data/processed/mitre_attack/mitre_techniques.jsonl")
+REPORT = ROOT / "soc_training_v4_audit.json"
+CATEGORIES = {
+    "alert_analysis", "ioc_analysis", "alert_correlation",
+    "false_positive_assessment", "severity_classification",
+    "mitre_mapping", "incident_summary", "uncertainty_analysis",
+}
+
+def main():
+    if not DATA.exists():
+        raise SystemExit(f"Dataset not found: {DATA}. Run build_soc_training_v4.py first.")
+    attack = {}
+    for line in ATTACK.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            row = json.loads(line)
+            attack[row["technique_id"]] = row
+    rows = [json.loads(x) for x in DATA.read_text(encoding="utf-8").splitlines() if x.strip()]
+    errors, malformed = [], []
+    cats = Counter()
+    input_sets, output_counts, families = {}, {}, {}
+    triples = set()
+    mapping_errors = []
+    statuses = Counter()
+    for i, r in enumerate(rows, 1):
+        for field in ("instruction","input","output","category","source","scenario_family","scenario_id","verification_status","metadata","generator_version"):
+            if field not in r or r[field] in ("", None):
+                errors.append(f"line {i}: missing {field}")
+        cat = r.get("category","UNKNOWN")
+        cats[cat] += 1
+        input_sets.setdefault(cat,set()).add(" ".join(r.get("input","").lower().split()))
+        output_counts.setdefault(cat,Counter())[" ".join(r.get("output","").lower().split())] += 1
+        families.setdefault(cat,set()).add(r.get("scenario_family",""))
+        statuses[r.get("verification_status","MISSING")] += 1
+        if len(r.get("input","").split()) < 8: errors.append(f"line {i}: input too short")
+        if len(r.get("output","").split()) < 20: errors.append(f"line {i}: output too short")
+        if re.search(r"(?im)\b(context|evidence)\s*[:=]\s*(?:\.|[a-z]\.)\s*$", r.get("input","")):
+            malformed.append(i)
+        key = tuple(" ".join(str(r.get(k,"")).lower().split()) for k in ("instruction","input","output"))
+        if key in triples: errors.append(f"line {i}: duplicate triple")
+        triples.add(key)
+        if cat == "mitre_mapping":
+            meta = r.get("metadata",{})
+            ref = attack.get(meta.get("candidate_technique_id"))
+            if not ref or ref.get("name") != meta.get("candidate_technique_name"):
+                mapping_errors.append({"line":i,"id":meta.get("candidate_technique_id"),"name":meta.get("candidate_technique_name")})
+    per_cat = {}
+    for cat in sorted(CATEGORIES):
+        oc = output_counts.get(cat,Counter())
+        per_cat[cat] = {
+            "records": cats[cat],
+            "unique_inputs": len(input_sets.get(cat,set())),
+            "unique_outputs": len(oc),
+            "most_common_output_count": oc.most_common(1)[0][1] if oc else 0,
+            "unique_scenario_families": len(families.get(cat,set())),
+        }
+    report = {
+        "status": "STRUCTURAL_AUDIT_ONLY_HUMAN_REVIEW_REQUIRED",
+        "record_count": len(rows),
+        "category_counts": dict(cats),
+        "per_category": per_cat,
+        "duplicate_triples": len(rows)-len(triples),
+        "malformed_context_count": len(malformed),
+        "malformed_context_lines": malformed,
+        "validation_errors": errors,
+        "mitre_reference_mismatches": mapping_errors,
+        "verification_status_counts": dict(statuses),
+        "factual_verification": "NOT VERIFIED. This audit cannot establish correctness of SOC reasoning or scenario labels.",
+    }
+    REPORT.write_text(json.dumps(report,indent=2),encoding="utf-8")
+    print(json.dumps(report,indent=2))
+    print(f"\nReport saved to: {REPORT}")
+    if errors or malformed or mapping_errors:
+        raise SystemExit("AUDIT FAILED: review errors before training.")
+    print("Structural checks passed; human review is still required.")
+
+if __name__ == "__main__":
+    main()
