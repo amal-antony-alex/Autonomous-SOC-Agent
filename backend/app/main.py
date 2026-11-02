@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.db import get_db
 from app.models.alert import Alert
@@ -89,7 +90,39 @@ def receive_wazuh_alert(
     database_timestamp = parsed_timestamp.replace(tzinfo=None)
 
     # --------------------------------------------------
-    # 3. Check for duplicates
+    # 3. Check for previously persisted Wazuh alert IDs
+    # --------------------------------------------------
+    wazuh_alert_id = normalized_alert.get("alert_id")
+
+    if wazuh_alert_id:
+        try:
+            existing_alert = (
+                db.query(Alert)
+                .filter(Alert.wazuh_alert_id == wazuh_alert_id)
+                .first()
+            )
+        except Exception as exc:
+            db.rollback()
+            print(
+                "Wazuh duplicate lookup failed: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Alert duplicate check failed",
+            ) from exc
+
+        if existing_alert is not None:
+            return {
+                "status": "duplicate",
+                "source": "wazuh",
+                "duplicate": True,
+                "database_id": existing_alert.id,
+            }
+
+    # --------------------------------------------------
+    # 4. Check in-memory fingerprint duplicates
     # --------------------------------------------------
     fingerprint = alert_deduplicator.generate_fingerprint(
         normalized_alert
@@ -133,7 +166,33 @@ def receive_wazuh_alert(
         )
 
         db.add(db_alert)
-        db.commit()
+
+        try:
+            db.commit()
+        except IntegrityError:
+            # Another request may have inserted this alert after
+            # the initial duplicate lookup.
+            db.rollback()
+
+            existing_alert = None
+            if wazuh_alert_id:
+                existing_alert = (
+                    db.query(Alert)
+                    .filter(Alert.wazuh_alert_id == wazuh_alert_id)
+                    .first()
+                )
+
+            if existing_alert is not None:
+                seen_fingerprints.discard(fingerprint)
+                return {
+                    "status": "duplicate",
+                    "source": "wazuh",
+                    "duplicate": True,
+                    "database_id": existing_alert.id,
+                }
+
+            raise
+
         db.refresh(db_alert)
 
         # --------------------------------------------------

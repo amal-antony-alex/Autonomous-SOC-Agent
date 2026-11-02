@@ -76,6 +76,63 @@ def test_multiple_failed_attempts_in_alert_support_brute_force():
     assert result["unsupported_claims"] == []
 
 
+def test_three_wazuh_events_from_one_ssh_attempt_remain_uncertain():
+    alert = failed_login_alert()
+    alert["full_log"] = (
+        "Failed password for invalid user nonexistentuser "
+        "from 127.0.0.1 port 39522 ssh2"
+    )
+
+    correlation_result = {
+        "correlated": True,
+        "alert_count": 3,
+        "related_alerts": [
+            {
+                "alert_id": "1793429577.124437",
+                "rule_id": "5710",
+                "rule_description": "sshd: Attempt to login using a non-existent user",
+                "full_log": (
+                    "Invalid user nonexistentuser from "
+                    "127.0.0.1 port 39522 (sshd[8958])"
+                ),
+            },
+            {
+                "alert_id": "1793429585.124982",
+                "rule_id": "5503",
+                "rule_description": "PAM authentication failure",
+                "full_log": (
+                    "pam_unix(sshd:auth): authentication failure "
+                    "rhost=127.0.0.1 (sshd[8958])"
+                ),
+            },
+            {
+                "alert_id": "1793429587.125507",
+                "rule_id": "5710",
+                "rule_description": "Failed SSH authentication",
+                "full_log": (
+                    "Failed password for invalid user nonexistentuser "
+                    "from 127.0.0.1 port 39522 ssh2 (sshd[8958])"
+                ),
+            },
+        ],
+    }
+
+    result = validator.validate(
+        alert,
+        [brute_force_rule()],
+        "This is a brute-force attack involving repeated failed attempts.",
+        correlation_result=correlation_result,
+    )
+
+    assert result["decision"] == "Uncertain"
+    assert result["correlation_supported"] is False
+    assert result["evidence_grounded"] is False
+    assert any(
+        "repeated failed attempts" in claim.lower()
+        for claim in result["unsupported_claims"]
+    )
+
+
 def test_unmatched_rulebook_event_remains_uncertain():
     result = validator.validate(
         failed_login_alert(),
@@ -144,8 +201,23 @@ def test_correlation_requires_multiple_failed_login_alerts():
         validator._correlation_supports_repeated_attempts(
             correlation_result
         )
-        is True
+        is False
     )
+
+def test_aggregate_correlation_count_does_not_prove_repeated_attempts():
+    correlation_result = {
+        "correlated": True,
+        "alert_count": 3,
+        "related_alerts": [],
+    }
+
+    assert (
+        validator._correlation_supports_repeated_attempts(
+            correlation_result
+        )
+        is False
+    )
+
 def test_unrelated_alerts_do_not_support_repeated_failed_logins():
     correlation_result = {
         "correlated": True,

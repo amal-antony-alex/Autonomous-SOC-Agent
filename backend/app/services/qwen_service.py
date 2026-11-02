@@ -51,7 +51,9 @@ class QwenService:
                     f"- Alert ID: {related.get('alert_id')}, "
                     f"Rule ID: {related.get('rule_id')}, "
                     f"Timestamp: {related.get('timestamp')}, "
-                    f"User: {related.get('source_user')}\n"
+                    f"User: {related.get('source_user')}, "
+                    f"Process ID: {related.get('process_id')}, "
+                    f"Source Port: {related.get('source_port')}\n"
                 )
 
             omitted_count = (
@@ -99,9 +101,15 @@ Return these six items:
 6. Recommended severity: Critical, High, Medium, or Low
 
 Rules:
-- Do not invent evidence or indicators.
+- Use only the supplied evidence. Never invent evidence or indicators.
 - Do not claim scanning based only on source/destination IPs or a port.
-- Do not claim repeated attempts unless multiple relevant alerts support that claim.
+- A correlated alert count represents Wazuh alert records, not independent authentication attempts.
+- Different Wazuh alert IDs do not prove different authentication attempts.
+- Multiple Wazuh alerts may represent different stages of one underlying authentication event.
+- Shared process IDs or source ports provide contextual evidence but do not independently establish repeated attempts.
+- Never infer brute-force activity from the correlated alert count alone.
+- Claim repeated authentication attempts only when explicit, reliable evidence establishes more than one actual failed authentication attempt.
+- If the evidence does not establish multiple independent attempts, explicitly state that repeated attempts are unconfirmed.
 - Distinguish the current alert from correlated alerts.
 - Do not treat the preliminary Tiny CyberLLM analysis as ground truth.
 - Do not assume a missing username means successful authentication.

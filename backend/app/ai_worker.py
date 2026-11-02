@@ -7,7 +7,8 @@ from app.models import Alert, Incident, Investigation
 from app.services.redis_queue import redis_queue
 from app.services.rag_service import rag_service
 from app.services.alert_correlator import alert_correlator
-
+# Increment this version whenever response-eligibility rules change.
+RESPONSE_ELIGIBILITY_POLICY_VERSION = 1
 
 def persist_investigation(
     db_alert_id,
@@ -66,6 +67,10 @@ def persist_investigation(
                 db.flush()
 
         findings = {
+            "response_eligibility_policy_version":(
+                RESPONSE_ELIGIBILITY_POLICY_VERSION
+            ),
+
             "alert_database_id": db_alert_id,
             "wazuh_alert_id": normalized_alert.get("alert_id"),
             "normalized_alert": normalized_alert,
@@ -83,7 +88,7 @@ def persist_investigation(
             ),
             "error": error,
             "human_review_required": (
-                not error and decision == "Uncertain"
+                bool(error) or decision == "Uncertain"
             ),
             "response_actions_executed": False,
         }

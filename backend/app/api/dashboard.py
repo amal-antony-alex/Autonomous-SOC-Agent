@@ -97,8 +97,9 @@ def dashboard_summary(db: Session = Depends(get_db)):
     )
     investigations = db.query(func.count(Investigation.id)).scalar() or 0
 
-    # Count completed, error-free investigations that explicitly require
-    # human review. Read persisted findings so pagination cannot undercount.
+    # Count all investigations explicitly requiring human review,
+    # including failed investigations. Read persisted findings so
+    # pagination cannot undercount.
     review_records = (
         db.query(Investigation.findings)
         .filter(Investigation.completed_at.isnot(None))
@@ -108,11 +109,7 @@ def dashboard_summary(db: Session = Depends(get_db)):
     pending_review = 0
     for (findings_value,) in review_records:
         findings = parse_findings(findings_value)
-        if (
-            findings.get("human_review_required") is True
-            and findings.get("investigation_status") == "Completed"
-            and not findings.get("error")
-        ):
+        if findings.get("human_review_required") is True:
             pending_review += 1
 
     return {

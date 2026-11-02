@@ -1,0 +1,25 @@
+# Python virtual environments
+.venv/
+.venv-linux/
+
+# Git and test caches
+.git/
+.pytest_cache/
+**/__pycache__/
+**/*.py[cod]
+
+# Secrets
+.env
+.env.*
+
+# Directories not required by the backend Dockerfile
+frontend/
+data/
+tests/
+scripts/
+docs/
+backups/
+docker/
+
+# Local generated files
+*.log

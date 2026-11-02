@@ -107,3 +107,33 @@ def test_correlator_rejects_malformed_timestamp():
     assert result["correlated"] is False
     assert result["alert_count"] == 0
     assert result["reason"] == "Missing or invalid alert timestamp"
+def test_correlator_preserves_source_port():
+    correlator = AlertCorrelator()
+
+    alert = make_alert(
+        "ssh-1",
+        "5710",
+        "Invalid user",
+        "2026-10-31T06:52:57Z",
+    )
+    alert["source_port"] = "39522"
+
+    result = correlator.correlate(alert)
+
+    assert result["related_alerts"][0]["source_port"] == "39522"
+
+
+def test_correlator_preserves_process_id():
+    correlator = AlertCorrelator()
+
+    alert = make_alert(
+        "ssh-2",
+        "5710",
+        "Failed password",
+        "2026-10-31T06:53:07Z",
+    )
+    alert["process_id"] = "8958"
+
+    result = correlator.correlate(alert)
+
+    assert result["related_alerts"][0]["process_id"] == "8958"

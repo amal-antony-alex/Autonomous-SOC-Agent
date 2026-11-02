@@ -52,7 +52,7 @@ def test_single_failed_login_is_uncertain(
     assert result["decision"] == "Uncertain"
     assert result["severity"] == "High"
 
-def test_correlated_repeated_failures_can_be_true_positive(
+def test_correlated_alert_records_alone_do_not_confirm_repeated_attempts(
     validator, single_failed_login, brute_force_match
 ):
     correlation_result = {
@@ -85,9 +85,66 @@ def test_correlated_repeated_failures_can_be_true_positive(
         correlation_result=correlation_result,
     )
 
-    assert result["decision"] == "True Positive"
-    assert result["correlation_supported"] is True
+    assert result["decision"] == "Uncertain"
+    assert result["evidence_grounded"] is False
+    assert result["correlation_supported"] is False
 
+def test_duplicate_correlated_alert_ids_do_not_support_repeated_attempts(
+    validator, single_failed_login, brute_force_match
+):
+    correlation_result = {
+        "correlated": True,
+        "alert_count": 3,
+        "related_alerts": [
+            {
+                "alert_id": "1001",
+                "rule_id": "5710",
+                "rule_description": "Failed password for invalid user",
+            },
+            {
+                "alert_id": "1001",
+                "rule_id": "5710",
+                "rule_description": "Failed password for invalid user",
+            },
+        ],
+    }
+
+    result = validator.validate(
+        single_failed_login,
+        brute_force_match,
+        "Repeated failed attempts were observed.",
+        correlation_result=correlation_result,
+    )
+
+    assert result["decision"] == "Uncertain"
+    assert result["correlation_supported"] is False
+
+
+def test_single_related_failed_login_does_not_support_repeated_attempts(
+    validator, single_failed_login, brute_force_match
+):
+    correlation_result = {
+        "correlated": True,
+        "alert_count": 1,
+        "related_alerts": [
+            {
+                "alert_id": "1001",
+                "rule_id": "5710",
+                "rule_description": "Failed password for invalid user",
+            }
+        ],
+    }
+
+    result = validator.validate(
+        single_failed_login,
+        brute_force_match,
+        "Repeated failed attempts were observed.",
+        correlation_result=correlation_result,
+    )
+
+    assert result["decision"] == "Uncertain"
+    assert result["correlation_supported"] is False
+    assert result["evidence_grounded"] is False
 
 def test_unsupported_repeated_attempt_claim_is_uncertain(
     validator, single_failed_login, brute_force_match
@@ -581,3 +638,87 @@ def test_rulebook_mitre_technique_is_accepted(validator):
         "T1110" in claim
         for claim in result["unsupported_claims"]
     )
+@pytest.mark.parametrize(
+    "qwen_analysis",
+    [
+        "The source repeatedly attempted to authenticate.",
+        "The activity is consistent with password guessing.",
+        "The attacker successfully authenticated.",
+        "The account was taken over.",
+        "The host was scanned for open ports.",
+        "A sequence of login attempts indicates credential guessing.",
+    ],
+)
+def test_semantically_unsupported_security_claims_are_detected(
+    validator, qwen_analysis
+):
+    alert = {
+        "rule_id": "100001",
+        "rule_level": 3,
+        "rule_description": "Controlled synthetic benchmark event",
+        "source_ip": "192.0.2.10",
+        "destination_ip": "198.51.100.20",
+        "destination_port": "443",
+        "full_log": "One synthetic event; unique marker regression123",
+    }
+
+    result = validator.validate(
+        alert=alert,
+        rulebook_matches=[],
+        qwen_analysis=qwen_analysis,
+        correlation_result={
+            "correlated": False,
+            "alert_count": 1,
+            "related_alerts": [],
+        },
+    )
+
+    assert result["decision"] == "Uncertain"
+    assert result["evidence_grounded"] is False
+    assert result["unsupported_claims"]
+
+
+def test_negated_semantic_claims_are_not_flagged(validator):
+    alert = {
+        "rule_id": "100001",
+        "rule_level": 3,
+        "rule_description": "Controlled synthetic benchmark event",
+        "full_log": "One synthetic event",
+    }
+
+    result = validator.validate(
+        alert=alert,
+        rulebook_matches=[],
+        qwen_analysis=(
+            "There is no evidence of repeated authentication. "
+            "Successful authentication was not observed. "
+            "No port scanning was established."
+        ),
+    )
+
+    assert result["decision"] == "Uncertain"
+    assert result["unsupported_claims"] == []
+
+
+def test_mixed_semantic_claims_preserve_unsupported_activity(
+    validator,
+):
+    alert = {
+        "rule_id": "100001",
+        "rule_level": 3,
+        "rule_description": "Controlled synthetic benchmark event",
+        "full_log": "One synthetic event",
+    }
+
+    result = validator.validate(
+        alert=alert,
+        rulebook_matches=[],
+        qwen_analysis=(
+            "The source repeatedly attempted authentication, "
+            "but successful authentication was not confirmed."
+        ),
+    )
+
+    assert result["decision"] == "Uncertain"
+    assert result["evidence_grounded"] is False
+    assert result["unsupported_claims"]

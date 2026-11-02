@@ -1,15 +1,19 @@
-FROM node:22.23.3-alpine
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
 COPY package*.json ./
-
 RUN npm ci
 
 COPY . .
-
 RUN npm run build
 
-EXPOSE 3000
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
+FROM nginx:alpine
+
+ENV NGINX_ENVSUBST_FILTER=SOC_REVIEWER_TOKEN
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+
+EXPOSE 3000

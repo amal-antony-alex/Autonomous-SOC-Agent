@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 
@@ -8,6 +9,13 @@ class AlertNormalizer:
         rule = alert.get("rule", {})
         agent = alert.get("agent", {})
         data = alert.get("data", {})
+        full_log = alert.get("full_log")
+
+        process_match = (
+            re.search(r"\bsshd\[(\d+)\]", full_log)
+            if isinstance(full_log, str)
+            else None
+        )
 
         normalized = {
             "timestamp": alert.get("timestamp"),
@@ -27,6 +35,14 @@ class AlertNormalizer:
             "agent_name": agent.get("name"),
 
             "source_ip": data.get("srcip"),
+
+            "source_port": data.get("srcport"),
+
+            "process_id": (
+                process_match.group(1)
+                if process_match
+                else None
+            ),
 
             "source_user": data.get("srcuser"),
 

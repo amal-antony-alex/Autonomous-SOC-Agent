@@ -1,0 +1,5 @@
+services:
+  benchmark-backend:
+    environment:
+      SOC_REVIEWER_TOKEN: ${SOC_REVIEWER_TOKEN:?Missing SOC_REVIEWER_TOKEN in .env}
+      SOC_REVIEWER_ID: ${SOC_REVIEWER_ID:?Missing SOC_REVIEWER_ID in .env}

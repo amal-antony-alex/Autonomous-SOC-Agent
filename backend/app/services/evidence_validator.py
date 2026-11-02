@@ -8,10 +8,24 @@ class EvidenceDecisionValidator:
     SEVERITY_PRIORITY = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
 
     REPEATED_TERMS = [
-        "multiple failed attempts", "multiple attempts",
-        "repeated failed attempts", "repeated attempts",
-        "several failed attempts", "numerous failed attempts",
+        "multiple failed attempts",
+        "multiple attempts",
+        "repeated failed attempts",
+        "repeated attempts",
+        "several failed attempts",
+        "numerous failed attempts",
         "repeated authentication attempts",
+
+        # Semantic variations
+        "repeated authentication",
+        "repeatedly attempted to authenticate",
+        "repeatedly attempted authentication",
+        "password guessing",
+        "credential guessing",
+        "sequence of login attempts",
+        "series of login attempts",
+        "multiple login attempts",
+        "multiple authentication attempts",
     ]
 
     COMPROMISE_TERMS = [
@@ -19,13 +33,23 @@ class EvidenceDecisionValidator:
         "account compromised", "account was compromised",
         "system compromised", "system was compromised",
         "attacker gained access", "attacker has gained access",
-        "unauthorized access was obtained",
+        "unauthorized access was obtained", "successfully authenticated",
+        "successfully logged in",
+        "account was taken over",
+        "account takeover",
+        "host was compromised",
+        "attacker obtained access",
+        "attacker successfully accessed",
     ]
 
     UNSUPPORTED_ACTIVITY_TERMS = [
         "powershell", "command injection", "network scanning",
         "port scanning", "nmap activity", "ldap",
-        "network service scanning", "service scanning",
+        "network service scanning", "service scanning", "scanned for open ports",
+        "scanned the host",
+        "host scanning",
+        "port scan detected",
+        "ports were scanned",
     ]
 
     NEGATION_TERMS = [
@@ -82,33 +106,14 @@ class EvidenceDecisionValidator:
 
     @staticmethod
     def _correlation_supports_repeated_attempts(correlation_result):
-        if not correlation_result:
-            return False
-        related_alerts = correlation_result.get("related_alerts") or []
-        if related_alerts:
-            failed_login_alerts = []
-            for alert in related_alerts:
-                if not isinstance(alert, dict):
-                    continue
-                rule_id = str(alert.get("rule_id", "")).strip()
-                description = " ".join([
-                    EvidenceDecisionValidator._text(alert.get("rule_description")),
-                    EvidenceDecisionValidator._text(alert.get("full_log")),
-                ])
-                is_failed_login = (
-                    rule_id == "5710"
-                    or ("failed password" in description and "password" in description)
-                )
-                if is_failed_login:
-                    failed_login_alerts.append(alert)
-            return len(failed_login_alerts) > 1
-        try:
-            return (
-                bool(correlation_result.get("correlated"))
-                and int(correlation_result.get("alert_count", 0)) > 1
-            )
-        except (TypeError, ValueError):
-            return False
+        """
+        Correlation groups related alerts but does not prove
+        independent authentication attempts.
+
+        Distinct Wazuh alert IDs and aggregate alert counts are
+        insufficient evidence of repeated login attempts.
+        """
+        return False
 
     @staticmethod
     def _phrase_is_affirmed(text, phrase):
@@ -216,7 +221,12 @@ class EvidenceDecisionValidator:
                 correlation_result
             )
         )
-        if failed_attempt_count is None and not correlation_supports_repeated:
+        repeated_attempts_supported = (
+            failed_attempt_count is not None
+            and failed_attempt_count > 1
+        )
+
+        if not repeated_attempts_supported:
             for term in EvidenceDecisionValidator.REPEATED_TERMS:
                 if EvidenceDecisionValidator._phrase_is_affirmed(text, term):
                     unsupported_claims.append(f"Unsupported claim: '{term}'")

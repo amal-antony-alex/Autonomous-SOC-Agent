@@ -87,6 +87,8 @@ class AlertCorrelator:
                 "full_log": alert.get("full_log"),
                 "source_user": alert.get("source_user"),
                 "timestamp": timestamp,
+                "source_port": alert.get("source_port"),
+                "process_id": alert.get("process_id"),
             })
 
         alert_count = len(source_alerts)

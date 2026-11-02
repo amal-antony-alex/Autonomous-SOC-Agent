@@ -1,0 +1,69 @@
+services:
+
+  benchmark-postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: benchmark
+      POSTGRES_PASSWORD: benchmark_local_only
+      POSTGRES_DB: socagent_benchmark
+    volumes:
+      - benchmark_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U benchmark -d socagent_benchmark"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  benchmark-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - benchmark_redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  benchmark-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "18000:8000"
+    environment:
+      DATABASE_URL: postgresql://benchmark:benchmark_local_only@benchmark-postgres:5432/socagent_benchmark
+      REDIS_URL: redis://benchmark-redis:6379/0
+      REDIS_QUEUE_NAME: soc_benchmark_investigation_queue
+    depends_on:
+      benchmark-postgres:
+        condition: service_healthy
+      benchmark-redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  benchmark-ai-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.ai_worker"]
+    environment:
+      DATABASE_URL: postgresql://benchmark:benchmark_local_only@benchmark-postgres:5432/socagent_benchmark
+      REDIS_URL: redis://benchmark-redis:6379/0
+      REDIS_QUEUE_NAME: soc_benchmark_investigation_queue
+    depends_on:
+      benchmark-postgres:
+        condition: service_healthy
+      benchmark-redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  benchmark_postgres_data:
+  benchmark_redis_data:

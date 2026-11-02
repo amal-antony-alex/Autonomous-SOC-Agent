@@ -1,0 +1,129 @@
+{
+  "purpose": "Qualitative generation comparison; not a benchmark",
+  "tokenizer": "ai/tiny_llm/tokenizer/artifacts/cyber_bpe/tokenizer.json",
+  "device": "cpu",
+  "decoding": "greedy",
+  "max_new_tokens": 120,
+  "checkpoints": {
+    "base": {
+      "path": "ai/tiny_llm/checkpoints/cyberllm_v2_2_soc_metrics_best.pt",
+      "model_type": "CyberLLM-v2.2-source-metrics",
+      "epoch": 5,
+      "recorded_validation_loss": 2.025662672280414
+    },
+    "fine_tuned": {
+      "path": "ai/tiny_llm/checkpoints/soc_curated_v3_splits_v2/best_validation.pt",
+      "model_type": "CyberLLM-SOC-curated-v3-splits-v2",
+      "epoch": 3,
+      "recorded_validation_loss": 4.227355593321275
+    }
+  },
+  "test_set_used": false,
+  "cases": [
+    {
+      "id": "alert_analysis_01",
+      "category": "alert_analysis",
+      "instruction": "Assess the alert using only the supplied evidence; separate facts from hypotheses.",
+      "input": "Alert ID: GEN-001\nHost: DC-01\nUser: j.smith\nObserved behavior: privileged account authenticated from an unusual source\nSource: 172.16.8.7\nDestination: 203.0.113.46\nBusiness purpose: undocumented\nAuthentication outcome: successful\nMFA result: unavailable\nPost-login activity: unknown",
+      "prompt_tokens": 136,
+      "decoding": "greedy",
+      "generated_tokens_limit": 120,
+      "outputs": {
+        "base": {
+          "response": "The behavior is consistent with the file hash.",
+          "stop_reason": "eos",
+          "prompt_tokens": 136
+        },
+        "fine_tuned": {
+          "response": "Observed: To not prove.0. The event. The supplied evidence. The supplied: the alert.1. The analyst should be consistent with the alert the alertzation. The endpoint telemetry.07. The source the alert. The supplied evidence. The.2. The source the alert.2.4.0. The. The. The source, and destination, and whether the alert not prove: the events. The supplied. The. Next investigation and destination, and source. The event is: whether the alert. The the alert.1.",
+          "stop_reason": "max_new_tokens",
+          "prompt_tokens": 136
+        }
+      }
+    },
+    {
+      "id": "powershell_01",
+      "category": "alert_analysis",
+      "instruction": "Analyze the observed activity. Separate facts, hypotheses, and recommended validation steps.",
+      "input": "Alert ID: GEN-002\nHost: WS-104\nProcess: powershell.exe\nCommand line: powershell.exe -EncodedCommand [REDACTED]\nParent process: winword.exe\nUser: analyst1\nDecoded command: unavailable\nProcess network connections: unknown",
+      "prompt_tokens": 111,
+      "decoding": "greedy",
+      "generated_tokens_limit": 120,
+      "outputs": {
+        "base": {
+          "response": "The logs to 203.",
+          "stop_reason": "eos",
+          "prompt_tokens": 111
+        },
+        "fine_tuned": {
+          "response": "Observed: Tisting. Dop: the alert. Dop: the alert contains the event. DNS, destination: the alert contains the alert. Disting, and destination, and whether the event. Disting. Disting, and whether the alert the indicator: the alert and destination, and whether the alert. Do not prove. Do not establish the activity. Disting, and whether the event. Disting, and destination the activity. Do not the account, and destination, and destination, and destinationer, and destination reputation",
+          "stop_reason": "max_new_tokens",
+          "prompt_tokens": 111
+        }
+      }
+    },
+    {
+      "id": "ioc_analysis_01",
+      "category": "ioc_analysis",
+      "instruction": "Analyze the supplied indicators. Do not claim an indicator is malicious without supporting evidence.",
+      "input": "Alert ID: GEN-003\nSource IP: 203.0.113.50\nDestination IP: 10.0.0.15\nFile hash: 44d88612fea8a8f36de82e1278abb02f\nThreat intelligence reputation: unavailable\nConnection outcome: unknown",
+      "prompt_tokens": 111,
+      "decoding": "greedy",
+      "generated_tokens_limit": 120,
+      "outputs": {
+        "base": {
+          "response": "The logs access.",
+          "stop_reason": "eos",
+          "prompt_tokens": 111
+        },
+        "fine_tuned": {
+          "response": "Observed approved a proof.0. The analyst: the events. The supplied evidence. The event is: T1.18. The evidence supports: the alertify the alert. The event. The supplied evidence. The event. The source is insufficient is a source, and destination, and source, and destination, and destination, and whether the event.",
+          "stop_reason": "eos",
+          "prompt_tokens": 111
+        }
+      }
+    },
+    {
+      "id": "mitre_mapping_01",
+      "category": "mitre_mapping",
+      "instruction": "Map the observed behavior to MITRE ATT&CK only when the evidence supports a technique; explain uncertainty.",
+      "input": "Alert ID: GEN-004\nObserved behavior: multiple failed SSH login attempts\nSource: 198.51.100.24\nTarget: linux-server-02\nSuccessful authentication: not observed in supplied data\nCredential use after attempts: unknown",
+      "prompt_tokens": 96,
+      "decoding": "greedy",
+      "generated_tokens_limit": 120,
+      "outputs": {
+        "base": {
+          "response": "MITRE ATT&CK mapping: T155.",
+          "stop_reason": "eos",
+          "prompt_tokens": 96
+        },
+        "fine_tuned": {
+          "response": "Observed: T1059. The. Rop: T1059. The. The.",
+          "stop_reason": "eos",
+          "prompt_tokens": 96
+        }
+      }
+    },
+    {
+      "id": "incident_summary_01",
+      "category": "incident_summary",
+      "instruction": "Write a concise SOC incident summary that separates observed facts from unresolved questions.",
+      "input": "Alert ID: GEN-005\nHost: server02\nUser: administrator\nSource IP: 203.0.113.25\nFailed logins: 6\nSuccessful login: yes\nOutbound connection: 203.0.113.90:443\nTime window: 5 minutes\nProcess responsible for connection: unknown\nData transfer volume: unavailable",
+      "prompt_tokens": 119,
+      "decoding": "greedy",
+      "generated_tokens_limit": 120,
+      "outputs": {
+        "base": {
+          "response": "The logs.",
+          "stop_reason": "eos",
+          "prompt_tokens": 119
+        },
+        "fine_tuned": {
+          "response": "Observed: the alert. Next investigation and whether the alert. The. The: Type the alert containsObserved: the alert containsObserved: the alert containsObserved: the event. The supplied the alert contains the activity. The analyst. The the event. Disting, and destination: whether the alert. The supplied. Dop: whether the event. The source 10. The is insufficient the alertObserved: the alert contains the alert and whether the source, and whether the alert not prove: the events. . The. Next. Next, and source, and",
+          "stop_reason": "max_new_tokens",
+          "prompt_tokens": 119
+        }
+      }
+    }
+  ]
+}

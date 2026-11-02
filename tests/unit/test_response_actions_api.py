@@ -55,7 +55,7 @@ def client(monkeypatch):
     with TestingSession() as db:
         incident = Incident(
             id=1,
-            incident_number="SOC-TEST-1",
+            incident_number="SOC-1",
             title="Synthetic test incident",
             description="Test-only incident",
             severity="High",
@@ -80,6 +80,7 @@ def client(monkeypatch):
         db.add(alert)
 
         findings = {
+            "response_eligibility_policy_version": 1,
             "alert_database_id": 1,
             "wazuh_alert_id": "TEST-ALERT-1",
             "normalized_alert": {

@@ -159,6 +159,7 @@ def test_failed_investigation_does_not_create_incident(
 
         assert investigation.incident_id is None
         assert findings["investigation_status"] == "Failed"
+        assert findings["human_review_required"] is True
         assert findings["response_actions_executed"] is False
 
 

@@ -61,7 +61,9 @@ class RAGService:
                 f"Alert ID: {related.get('alert_id')}; "
                 f"Rule ID: {related.get('rule_id')}; "
                 f"Timestamp: {related.get('timestamp')}; "
-                f"User: {related.get('source_user')}"
+                f"User: {related.get('source_user')}; "
+                f"Process ID: {related.get('process_id')}; "
+                f"Source Port: {related.get('source_port')}"
             )
 
         if len(related_alerts) > 5:
@@ -87,13 +89,28 @@ CORRELATION EVIDENCE
 RETRIEVED SECURITY KNOWLEDGE
 {context}
 """.strip()
-
         return (
             "Instruction:\n"
             "Analyze this SOC alert using only the supplied evidence. "
             "Identify the likely security event, cite relevant evidence, "
             "and state what remains uncertain. Do not invent indicators "
             "or claim malicious activity without sufficient evidence.\n\n"
+            "Correlation and authentication evidence rules:\n"
+            "- Correlated alert counts represent Wazuh alert records, "
+            "not independent authentication attempts.\n"
+            "- Different Wazuh alert IDs do not establish multiple "
+            "independent authentication attempts.\n"
+            "- Multiple alerts may represent different stages of one "
+            "underlying authentication event.\n"
+            "- Shared process IDs or source ports provide context but "
+            "do not prove repeated attempts.\n"
+            "- Never infer brute-force activity from correlated alert "
+            "counts alone.\n"
+            "- Claim repeated authentication attempts only when explicit, "
+            "reliable evidence establishes more than one actual failed "
+            "authentication attempt.\n"
+            "- If such evidence is unavailable, state that repeated "
+            "attempts are unconfirmed.\n\n"
             "Input:\n"
             f"{input_text}\n\n"
             "Response:\n"

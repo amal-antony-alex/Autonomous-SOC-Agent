@@ -1,0 +1,15 @@
+{
+  "run_id": "20261102T143221Z",
+  "target_alerts": 100,
+  "accepted": 100,
+  "duplicates": 0,
+  "failures": 0,
+  "ingestion_duration_seconds": 0.969,
+  "ingestion_throughput_alerts_per_second": 103.235,
+  "latency_seconds": {
+    "mean": 0.0095,
+    "median": 0.0087,
+    "p95": 0.0143,
+    "max": 0.0446
+  }
+}

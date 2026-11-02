@@ -49,3 +49,31 @@ rag/embeddings/metadata.npy
 
 # Curated cybersecurity instruction dataset
 !data/raw/cybersecurity_instruction_dataset.jsonl
+
+# Local backups and temporary recovery files
+backups/
+*.bak
+*.backup
+*.save
+*.pre-*
+*.failed-replacement-*
+
+# Local datasets and review packages
+data/reviewed_v6_4_1/
+v6_4_1_pending_review_bundle.zip
+
+# Generated benchmark and Python artifacts
+benchmarks/__pycache__/
+*.py[cod]
+
+# Local temporary files
+/full_log
+/id
+/=
+/{
+
+# Additional local recovery files
+*.bak-*
+*.backup-*
+*.pre_*
+*.step*-backup
