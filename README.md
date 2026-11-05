@@ -7,8 +7,7 @@ results for analyst review. The system is designed around a human-gated
 response model: AI can investigate and recommend actions, but
 consequential response execution remains under human control.
 
-**Project status:** Active development\
-**Development timeline:** August 2026 -- Ongoing\
+**Development timeline:** August 2026 -- November 2026\
 **Primary integration:** Wazuh 4.14.7\
 **Repository:**
 [amal-antony-alex/Autonomous-SOC-Agent](https://github.com/amal-antony-alex/Autonomous-SOC-Agent)
